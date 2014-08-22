@@ -1,0 +1,150 @@
+#include <stdio.h>
+#include <math.h>
+#include "mpi.h"
+
+#define MAX_ORDER 1048576
+#define MAX 2
+
+main(int argc, char* argv[]) {
+    int    p;
+    int    my_rank;
+    int    test;
+    int    min_size = 1;
+    int    max_size;
+    int    incr;
+    float  x[MAX_ORDER];
+    int    size;
+    int    pass;
+    MPI_Status  status;
+    int         i,j;
+    double      wtime_overhead;
+    double      start, finish;
+    double      raw_time,time;
+    float sum1,mean,sum_deviation=0,sd,ssd,sem;
+    float minimum,max,median,rse,swap,swap1;
+    float MD1[1000],A[1000];
+    MPI_Comm    comm;
+
+     if( argc >= 2 )
+         max_size = atoi(argv[1]);
+      else
+         max_size = 1048576;
+         if( argc >= 3 )
+            min_size = atoi(argv[2]);
+            else 
+            min_size =1;
+         if( argc >= 4 )
+         incr = atoi(argv[3]);
+        else
+        incr = 102400;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &p);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    MPI_Comm_dup(MPI_COMM_WORLD, &comm);
+
+      wtime_overhead = 0.0;
+    for (i = 0; i < 100; i++) {
+        start = MPI_Wtime();
+        finish = MPI_Wtime();
+        wtime_overhead = wtime_overhead + (start - finish);
+    }
+    wtime_overhead = wtime_overhead/100.0;
+
+    if(my_rank ==0)
+    {
+    printf("PacketSize PacketTime Bandwidth\tMinimum\tMedian\tMaximum\tMean\tSD\tSSD\tSEM\tRSE \n");
+    printf("(Bytes)\t(usecs)\t (MB/usec)\t(usec)\t(usec)\t(usec)\t(usec)\t(usec)\t(usec)\t(usec)\n");
+    printf("_______________________________________________________________________________________________\n\n");
+    }
+
+    if (my_rank == 0) {
+        for (test = 0, size = min_size;size <= max_size; size = size + incr, test++)
+                /*for (test = 0, size = min_size;
+                size <= max_size; size *= 2, test++)*/
+                {
+            for (pass = 0; pass < MAX; pass++) {
+                MPI_Barrier(comm);
+                start = MPI_Wtime();
+                MPI_Send(x, size, MPI_FLOAT, 1, 1, comm);
+                MPI_Recv(x, size, MPI_FLOAT, 1, 1, comm, &status);
+                finish = MPI_Wtime();
+                time = (finish - start-wtime_overhead)*1000000;
+                raw_time += (finish - start-wtime_overhead)*1000000;
+                A[pass] = time;
+                MD1[pass] = time;
+                //printf("%f  ",A[pass]);
+
+            }
+        raw_time = raw_time/MAX;
+        mean = raw_time;
+        minimum = A[0];
+        for (i = 0; i < MAX; i++) {
+
+            if ( minimum >A[i])
+            {
+            minimum = A[i];
+            // printf("minimum is:%1.3f",minimum);
+
+            }
+            max = A[0];
+            if ( A[i] > max )
+            {
+            max = A[i];
+            }
+            }
+    for (i = 0; i < MAX; i++) {
+        for(j=0;j< MAX-1;j++){
+        if(MD1[j]>MD1[j+1])
+        {
+        swap1=MD1[j];
+        MD1[j]=MD1[j+1];
+        MD1[j+1]=swap1;
+        }
+        }
+        }
+    if((i)%2==0){
+    median = (MD1[i/2]+MD1[i/2-1])/2;
+        }
+    else
+    median = MD1[i/2];
+        sum_deviation=0;
+     for (i = 0;i<MAX; i++)
+            {
+        sum_deviation+=(A[i]-mean)*(A[i]-mean);
+            }
+        sd=sqrt(sum_deviation/i);
+        ssd=sqrt(sum_deviation/(i-1));
+        sem = ssd/(sqrt(i));
+        rse =(sem/mean)*100;
+
+            //raw_time = raw_time/MAX;
+            printf("%7d\t %1.2f\t%1.7f", size, raw_time,2*size/(1048576*raw_time));
+            printf("\t%2.2f\t",minimum);// printing minimum
+            printf("%2.2f\t",median);// median
+            printf("%2.2f\t",max);//printing maximum
+            printf("%2.2f\t",mean);//printing mean
+            printf("%2.2f\t",sd); // printing standard deviation
+            printf("%2.2f\t",ssd); //printing sample standard deviation
+            printf("%2.2f\t",sem); // printing standard error of mean
+            printf("%2.2f%\n",rse);// printing relative standard error
+            raw_time=0;
+
+        }
+    }
+     else { /* my_rank == 1 */
+        for (test = 0, size = min_size; size <= max_size;size = size + incr, test++)
+
+          {
+            for (pass = 0; pass < MAX; pass++) {
+                MPI_Barrier(comm);
+                MPI_Recv(x, size, MPI_FLOAT, 0, 1, comm,&status);
+                MPI_Send(x, size, MPI_FLOAT, 0, 1, comm);
+            }
+        }
+
+    }
+
+    MPI_Finalize();
+
+ }  /* main */
