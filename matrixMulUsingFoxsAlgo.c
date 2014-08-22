@@ -1,3 +1,5 @@
+/*Sorce Code From Peter Pacheco Prof. Mary Thomas SDSU 2014 */
+
 #include <stdio.h>
 #include "mpi.h"
 #include <math.h>
