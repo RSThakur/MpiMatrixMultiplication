@@ -1,0 +1,193 @@
+/*
+ * ring code source: https://gist.github.com/perdacherMartin
+ *
+ * Modified by M.Thomas, Feb 2014 to use variable number of
+ *    repetitions, renamed iters
+
+ modified by Rakesh Thakur to send different size of packets as 2^n
+ *
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include "mpi.h"
+
+#define MASTER 0
+#define REPETITIONS 10
+#define T_mpisendtype MPI_CHAR
+
+typedef unsigned char T_arraytype;
+
+void InitArray(T_arraytype array[], long size, T_arraytype value );
+void Sum(T_arraytype arrayA[], T_arraytype arrayB[], long size);
+
+int main(int argc, char *argv[]){
+        int myrank, nprocs, leftid, rightid, val, tmp,i,j,c=0;
+        float packetsize,swap;
+        long n;
+        int    min_size = 1;
+        //double times[REPETITIONS];
+       // double* times;
+        double tstart,tend,tadd =0.0;
+        int iters,test;
+        float sum1,mean,sum_deviation=0,sd,ssd,sem;
+        float minimum,max,median,rse;
+        float M[1000],MD[1000];
+
+        MPI_Status recv_status;
+        MPI_Init(&argc, &argv);
+        MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+        MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+
+        if ( argc != 3 ){
+        printf("Usage: mpiexec -n nodecount ring1bb n iters \n\n");
+                return 1;
+    }
+
+        n = atol(argv[1]);
+        iters = atol(argv[2]);
+
+        //times = (double*) malloc(iters*sizeof(double));
+
+        T_arraytype a[n];
+        T_arraytype b[n];
+        T_arraytype recv[n];
+        InitArray(a,n,myrank);
+
+        if(myrank == MASTER)
+        {
+             printf("ring size is %i nodes\n", nprocs);
+            printf("max message specified= %1.0ld\n", n);
+            printf("min message specified= %1.0d\n", min_size);
+            printf("iterations           = %i\n\n", iters);
+
+            printf("\n\tPacketLength\t    PacketTime\t    Bandwidth\t \n");
+            printf("\tbytes         \t     usec's  \t       MB/usec\n");
+            printf("___________________________________________________________\n\n");
+        }
+
+        for(i=0,packetsize = min_size; packetsize <= n; packetsize*=2,i++)
+
+            {
+
+
+        // for ( i = 0 ; i < REPETITIONS ; ++i ){
+        for ( j = 0 ; j < iters ; ++j ){
+                MPI_Barrier(MPI_COMM_WORLD);
+
+                InitArray(b,packetsize,0);
+
+                tstart = MPI_Wtime();
+
+                leftid = myrank - 1 < 0 ? nprocs - 1 : myrank -1 ;
+                rightid = myrank + 1 >= nprocs ? 0 : myrank +1 ;
+
+                // send to the left and receive from the righ
+                MPI_Sendrecv(&a,packetsize,T_mpisendtype,leftid,0,&recv,packetsize,MPI_INT,rightid,0,MPI_COMM_WORLD, &recv_status);
+                Sum(recv, b, packetsize);
+
+                // send to the right and receive from the left
+                MPI_Sendrecv(&a,packetsize,T_mpisendtype,rightid,0,&recv,packetsize,MPI_INT,leftid,0,MPI_COMM_WORLD, &recv_status);
+                Sum(recv, b, packetsize);
+                Sum(a, b, packetsize);
+
+                tend = MPI_Wtime();
+                tadd += (tend - tstart);
+        }
+        tadd = tadd/iters;
+        if ( myrank == MASTER )
+            {
+
+            printf("%7.0f bytes took  %9.3fusec     %9.7f MB/usec\n", packetsize, tadd*1000000,2*packetsize/(1048576*tadd*1000000));
+            M[i] =tadd*1000000;//copying time into array M[]
+            MD[i]= tadd*1000000;
+            c++;
+            }
+
+
+
+}
+//printf("%ivalue of c",c);
+if (myrank ==MASTER)
+    {
+    minimum = M[0];
+ for(test=0,packetsize = min_size; packetsize <= n; packetsize*=2,test++)
+        {
+
+     //printf("%1.3f\n",M[test]);
+     sum1 = sum1 + M[test];
+    if (  minimum >M[test]  )
+        {
+           minimum = M[test];
+        }
+
+         max = M[0];
+    if ( M[test] > max )
+        {
+           max = M[test];
+        }
+
+        }
+    mean=sum1/(test);
+
+    printf("\nTotal time for all packets is = %2.3f\n",sum1);
+    printf("Minimum is:%2.3f\n",minimum);
+    printf("Mean = %2.3f\n",mean);
+    printf("maximum is:%2.3f\n",max);
+
+    for(i=0;i<c;i++)
+    {
+    for(j=0;j< c-1;j++)
+    {
+        if(MD[j]>MD[j+1])
+        {
+        swap=MD[j];
+        MD[j]=MD[j+1];
+        MD[j+1]=swap;
+        }
+    }
+    }
+    if((i)%2==0) {
+    median = (MD[i/2]+MD[i/2-1])/2;
+        }
+    else
+        median = MD[i/2];
+    printf("median is :%2.3f\n",median);
+    for(test=0,packetsize = min_size; packetsize <= n; packetsize*=2,test++)
+            {
+    sum_deviation+=(M[test]-mean)*(M[test]-mean);
+            }
+    sd=sqrt(sum_deviation/test);
+    printf("standard deviation is:%2.3f\n",sd);
+
+    ssd=sqrt(sum_deviation/(test-1));
+    printf("standard sample deviation is:%2.3f\n",ssd);
+    sem = ssd/(sqrt(test));
+    printf("standard error is:%2.3f\n",sem);
+    rse =(sem/mean)*100;
+    printf("Relative standard error is:%2.3f%\n",rse);
+    }
+        MPI_Finalize();
+
+}
+
+
+void InitArray(T_arraytype array[], long size, T_arraytype value ){
+        long i;
+
+        // initialisation of the array
+        for ( i=0l ; i < size ; ++i ){
+                array[i] = value;
+              //  prinf("%f\n",array[i]);
+        }
+}
+
+// elementwise sum of A + B and store it in B
+void Sum(T_arraytype arrayA[], T_arraytype arrayB[], long size){
+        long i;
+
+        // calculate elmentwise sum
+        for ( i=0l ; i < size ; ++i ){
+                arrayB[i] = arrayB[i] + arrayA[i];
+        }
+}
